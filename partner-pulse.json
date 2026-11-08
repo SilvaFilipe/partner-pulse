@@ -1,0 +1,605 @@
+{
+  "name": "Partner Pulse",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -240,
+        112
+      ],
+      "id": "9a7471cf-209c-4d1a-9093-342e61437073",
+      "name": "Every morning at 8am"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        -80
+      ],
+      "id": "fbdb3627-a6b2-4a60-a6b2-189c147e2df9",
+      "name": "Run now (test)"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {json:{partner:'GitHub',feed:'https://github.blog/changelog/feed/'}},\n{json:{partner:'Google Workspace',feed:'https://feeds.feedburner.com/GoogleAppsUpdates'}},\n]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        16
+      ],
+      "id": "3ae1df60-f023-40e2-bb5c-7a97cf9a76f1",
+      "name": "Partner feeds"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.feed }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        16
+      ],
+      "id": "80082d54-f33e-4c9e-8a98-f6dd31f1a70e",
+      "name": "Read changelog",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const src = $('Partner feeds').item.json;\nreturn { json: { ...$json, partner: src.partner } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        16
+      ],
+      "id": "2986f85e-9a99-4715-a308-b954a70e9b00",
+      "name": "Tag partner"
+    },
+    {
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "dedupeValue": "={{ $json.link }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        16
+      ],
+      "id": "dbcc5a1c-5181-47ad-99c7-2d2d5165f9be",
+      "name": "Skip already seen"
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/n8n-io/n8n/contents/packages/nodes-base/nodes",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "partner-pulse"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -16,
+        16
+      ],
+      "id": "7b9345d8-5a85-4b02-8303-b88419e1b368",
+      "name": "Get n8n node list",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/n8n-io/n8n/contents/packages/nodes-base/nodes/Google",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "partner-pulse"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        208,
+        16
+      ],
+      "id": "3d5547aa-26f2-457a-98ee-182e0cca1fce",
+      "name": "Get Google node list",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const clean = n => n && !n.includes('.') && n !== 'test';\nconst top = $('Get n8n node list').all().map(i => i.json.name).filter(clean).filter(n => n !== 'Google');\nconst google = $('Get Google node list').all().map(i => i.json.name).filter(clean).map(n => 'Google ' + n);\nreturn [{ json: { nodeNames: [...top, ...google].join(', ') } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        16
+      ],
+      "id": "a9b16fb9-4e2f-4882-98c9-22304fdfdc97",
+      "name": "Node names"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You triage partner API changelog entries for the team that maintains n8n's integration nodes.\n\nChangelog entry from {{ $json.partner }}:\nTitle: {{ $json.title }}\nDate: {{ $json.isoDate || $json.pubDate }}\nText: {{ ($json.contentSnippet || $json.content || '').slice(0, 3000) }}\n\nn8n node folders (only pick from this list): {{ $('Node names').first().json.nodeNames }}\n\nReturn:\n- change_type: one of breaking | deprecation | new_capability | irrelevant\n- affected_nodes: names from the list above only; empty array if none\n- severity: 1 (cosmetic) to 5 (workflows will fail)\n- summary: one plain-English sentence\n- action: the concrete next step for the nodes team (e.g. \"add operation X to the Google Sheet node\")\n- confidence: 0 to 1\nIf unsure, prefer \"irrelevant\" with low confidence. Never invent node names.\n",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1552,
+        16
+      ],
+      "id": "d1ab5ae8-ecdb-44c9-af2b-dfbf5dfacbb1",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-haiku-5-5",
+          "mode": "list",
+          "cachedResultName": "Claude Haiku 5.5"
+        },
+        "options": {
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        1560,
+        248
+      ],
+      "id": "bf05f324-07e4-4f0f-b2d8-59bc247dadc8",
+      "name": "Anthropic Chat Model",
+      "credentials": {
+        "anthropicApi": {
+          "id": null,
+          "name": "",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{ \"change_type\": \"deprecation\", \"affected_nodes\": [\"Github\"], \"severity\": 4,\n  \"summary\": \"One sentence in plain English.\", \"action\": \"What the nodes team should do.\", \"confidence\": 0.8 }\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1688,
+        248
+      ],
+      "id": "979768f0-9e3d-489e-a8b6-aba567f18265",
+      "name": "Classify change"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const src = $('Skip already seen').item.json;\nreturn { json: { ...src, ...$json.output } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1904,
+        16
+      ],
+      "id": "f775ce55-db7a-471b-972b-bb905bae7039",
+      "name": "Keep source"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ ['breaking','deprecation'].includes($json.change_type) && $json.confidence >= 0.6 }}",
+                    "rightValue": "=breaking",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "6c4a8a53-ff1e-4f46-8d2c-8a7dd1d98c8d"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Act now"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "45b9f639-8f5e-4eae-b280-e39674a2fb5b",
+                    "leftValue": "={{ $json.change_type }}",
+                    "rightValue": "new_capability",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Opportunity"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        2128,
+        16
+      ],
+      "id": "e1b2ee81-3745-4f1e-92cc-248d41a003f6",
+      "name": "Route by impact"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "owner": {
+          "__rl": true,
+          "value": "SilvaFilipe",
+          "mode": "list",
+          "cachedResultName": "SilvaFilipe",
+          "cachedResultUrl": "https://github.com/SilvaFilipe"
+        },
+        "repository": {
+          "__rl": true,
+          "value": "partner-pulse",
+          "mode": "list",
+          "cachedResultName": "partner-pulse",
+          "cachedResultUrl": "https://github.com/SilvaFilipe/partner-pulse"
+        },
+        "title": "=[{{ $json.partner }}] {{ $json.summary }}",
+        "body": "=**Affected n8n nodes:** {{ ($json.affected_nodes || []).join(', ') || 'none detected' }}\n**Severity:** {{ $json.severity }}/5 · confidence {{ $json.confidence }}\n**Suggested action:** {{ $json.action }}\n\nSource: {{ $json.link }} ({{ $json.isoDate || $json.pubDate }})\n_Triaged automatically by Partner Pulse. Please verify before acting._\n",
+        "labels": [
+          {
+            "label": "={{ $json.change_type }}"
+          }
+        ],
+        "assignees": []
+      },
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1.1,
+      "position": [
+        2352,
+        -80
+      ],
+      "id": "3aeafd4c-d639-470e-b549-12b362b83f4d",
+      "name": "Open Github issue",
+      "webhookId": "2fd7d78f-c86a-49e7-9cda-b058f2179984",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "kNeYVKgcByM3LpPS",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(i => i.json);\nconst rows = items.map(i => `• <b>${i.partner}</b> → ${(i.affected_nodes || []).join(', ') || 'new node?'}: ${i.summary}<br>&nbsp;&nbsp;<i>${i.action}</i> (<a href=\"${i.link}\">source</a>)`);\nreturn [{ json: { count: items.length, html: `<h3>Node opportunities today (${items.length})</h3>${rows.join('<br>')}` } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2352,
+        112
+      ],
+      "id": "a472cfcf-a78b-4659-864b-cd220afcf6b3",
+      "name": "Build digest"
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=Partner Pulse: {{ $json.count }} node opportunities",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2576,
+        112
+      ],
+      "id": "f7652260-3a61-45c2-83eb-7944b76a24b8",
+      "name": "Email digest",
+      "webhookId": "0c573ac1-1258-46d0-8171-ba9e6fa6c4d6",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GJkCZ5CTNQYaijBT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## COLLECT\n",
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        320,
+        -240
+      ],
+      "id": "4575ff15-6368-40e8-b0d4-c846b6c4fefa",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## UNDERSTAND",
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1536,
+        -256
+      ],
+      "id": "818607a4-4ad8-4115-a9d0-b734ec4a7c2d",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## ACT",
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2064,
+        -256
+      ],
+      "id": "c493f099-fd69-41e7-b960-f8e7e3392cdd",
+      "name": "Sticky Note2"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every morning at 8am": {
+      "main": [
+        [
+          {
+            "node": "Get n8n node list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (test)": {
+      "main": [
+        [
+          {
+            "node": "Get n8n node list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Partner feeds": {
+      "main": [
+        [
+          {
+            "node": "Read changelog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read changelog": {
+      "main": [
+        [
+          {
+            "node": "Tag partner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tag partner": {
+      "main": [
+        [
+          {
+            "node": "Skip already seen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get n8n node list": {
+      "main": [
+        [
+          {
+            "node": "Get Google node list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Google node list": {
+      "main": [
+        [
+          {
+            "node": "Node names",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Node names": {
+      "main": [
+        [
+          {
+            "node": "Partner feeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip already seen": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify change": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Keep source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep source": {
+      "main": [
+        [
+          {
+            "node": "Route by impact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by impact": {
+      "main": [
+        [
+          {
+            "node": "Open Github issue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build digest": {
+      "main": [
+        [
+          {
+            "node": "Email digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "6qpBf0ViZ2dJtED9",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "3a50da60-5ceb-40b4-8747-56d23712e425",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "46fdbb2308e0e9218bf8b5e64d4922c22cee417297d5eaaaf620b6c8de3af281"
+  },
+  "nodeGroups": [],
+  "id": "r9Lgs7mE8qN21QxO",
+  "tags": []
+}
